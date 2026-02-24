@@ -1,11 +1,7 @@
 ﻿"use client";
 import { useState } from "react";
 import { TeacherApiService } from "@/services/teacher-api.service";
-
-function getCurrentAcademicYearBE() {
-    const year = new Date().getFullYear();
-    return year < 2400 ? year + 543 : year;
-}
+import { getCurrentAcademicYearBE } from "@/features/student/academic-term";
 
 export function FitnessFeature({ session }: { session: any }) {
     const [students, setStudents] = useState<any[]>([]);
@@ -35,7 +31,7 @@ export function FitnessFeature({ session }: { session: any }) {
 
     const handleSaveAll = async () => {
         if (!Number.isFinite(year) || year <= 0) {
-            alert("ปี (พ.ศ.) ไม่ถูกต้อง");
+            alert("ปีการศึกษาไม่ถูกต้อง");
             return;
         }
         if (!Number.isFinite(semester) || ![1, 2].includes(semester)) {
@@ -100,7 +96,7 @@ export function FitnessFeature({ session }: { session: any }) {
                     </select>
                 </div>
                 <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1">ปี (พ.ศ.)</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1">ปีการศึกษา</label>
                     <input type="number" className="px-4 py-2 border border-slate-200 rounded-xl outline-none w-28" value={year} onChange={(e) => setYear(Number(e.target.value))} />
                 </div>
                 <div>

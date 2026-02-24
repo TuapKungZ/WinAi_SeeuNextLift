@@ -234,8 +234,12 @@ export const TeacherGradeCutService = {
             });
 
             const pct = maxPossible > 0 ? (totalScore / maxPossible) * 100 : 0;
-            const grade = calculateGradeFromScales(pct, scales);
-            const storedGrade = normalizeGradeLabel(e.final_grades?.letter_grade) || e.final_grades?.letter_grade || grade;
+            const calculatedGrade = calculateGradeFromScales(pct, scales);
+            const normalizedStoredGrade = normalizeGradeLabel(e.final_grades?.letter_grade);
+            const rawStoredGrade = String(e.final_grades?.letter_grade ?? '').trim();
+            const storedGrade = normalizedStoredGrade || rawStoredGrade || null;
+            const isLocked = Boolean(e.final_grades?.is_locked);
+            const displayGrade = isLocked ? (storedGrade || calculatedGrade) : calculatedGrade;
 
             return {
                 student_id: student.id,
@@ -247,8 +251,10 @@ export const TeacherGradeCutService = {
                 total_score: totalScore,
                 max_possible: maxPossible,
                 percentage: Math.round(pct * 100) / 100,
-                grade: storedGrade,
-                is_locked: e.final_grades?.is_locked || false,
+                grade: displayGrade,
+                calculated_grade: calculatedGrade,
+                stored_grade: storedGrade,
+                is_locked: isLocked,
             };
         }).filter(Boolean);
     },

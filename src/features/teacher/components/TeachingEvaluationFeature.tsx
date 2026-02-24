@@ -1,6 +1,7 @@
 ﻿"use client";
 import { useEffect, useMemo, useState } from "react";
 import { TeacherApiService } from "@/services/teacher-api.service";
+import { getCurrentAcademicYearBE } from "@/features/student/academic-term";
 
 function latestYearSemester(rows: any[]) {
     if (!rows.length) return null;
@@ -13,7 +14,7 @@ export function TeachingEvaluationFeature({ session }: { session: any }) {
     const [results, setResults] = useState<any[]>([]);
     const [allResults, setAllResults] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const [year, setYear] = useState(new Date().getFullYear());
+    const [year, setYear] = useState(getCurrentAcademicYearBE());
     const [semester, setSemester] = useState(1);
     const [notice, setNotice] = useState("");
 
@@ -96,7 +97,7 @@ export function TeachingEvaluationFeature({ session }: { session: any }) {
 
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-col sm:flex-row gap-3 sm:items-end">
                 <div>
-                    <label className="text-xs text-slate-500 block mb-1">ปี (พ.ศ.)</label>
+                    <label className="text-xs text-slate-500 block mb-1">ปีการศึกษา</label>
                     <select className="px-3 py-2 border border-slate-200 rounded-xl" value={String(year)} onChange={(e) => setYear(Number(e.target.value))}>
                         {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
                     </select>

@@ -61,6 +61,35 @@ export const StudentApiService = {
         return fetchApi<{ advisors: any[] }>(`/api/student/advisor?${params.toString()}`);
     },
 
+    async getAdvisorTeacherEvaluationTemplate(teacher_id: number, year: number, semester: number) {
+        const params = new URLSearchParams({
+            action: "template",
+            teacher_id: teacher_id.toString(),
+            year: year.toString(),
+            semester: semester.toString(),
+        });
+        return fetchApi<any>(`/api/student/advisor-evaluation?${params.toString()}`);
+    },
+
+    async submitAdvisorTeacherEvaluation(
+        teacher_id: number,
+        data: { name: string; score: number }[],
+        year: number,
+        semester: number,
+        feedback: string
+    ) {
+        return fetchApi<any>('/api/student/advisor-evaluation', {
+            method: 'POST',
+            body: JSON.stringify({
+                teacher_id,
+                data,
+                year,
+                semester,
+                feedback
+            })
+        });
+    },
+
     // --- Schedule ---
     async getClassSchedule(year: number, semester: number) {
         return fetchApi<any[]>(`/api/student/schedule/class?year=${year}&semester=${semester}`);

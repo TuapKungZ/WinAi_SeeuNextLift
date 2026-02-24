@@ -11,11 +11,23 @@ export async function GET(request: Request) {
         const student_id = sessionResult.studentId;
 
         const { searchParams } = new URL(request.url);
-        const semesterParsed = parseIntegerParam(searchParams.get('semester_id'));
-        const semesterId = semesterParsed.ok ? semesterParsed.value : undefined;
+        const semesterIdParsed = parseIntegerParam(searchParams.get('semester_id'));
+        if (!semesterIdParsed.ok) return errorResponse("Invalid parameter: semester_id", 400, semesterIdParsed.error);
+        const yearParsed = parseIntegerParam(searchParams.get('year'));
+        if (!yearParsed.ok) return errorResponse("Invalid parameter: year", 400, yearParsed.error);
+        const semesterParsed = parseIntegerParam(searchParams.get('semester'));
+        if (!semesterParsed.ok) return errorResponse("Invalid parameter: semester", 400, semesterParsed.error);
 
-        // In presentATOM, cart = enrolled items (no separate cart status)
-        const data = await RegistrationService.getRegistered(student_id, semesterId ?? undefined);
+        const hasExplicitTerm = yearParsed.value != null || semesterParsed.value != null;
+        let semesterId = semesterIdParsed.value;
+        if (!semesterId && yearParsed.value != null && semesterParsed.value != null) {
+            semesterId = await RegistrationService.resolveSemesterId(yearParsed.value, semesterParsed.value);
+        }
+        if (hasExplicitTerm && yearParsed.value != null && semesterParsed.value != null && !semesterId) {
+            return successResponse([], "Cart retrieved");
+        }
+
+        const data = await RegistrationService.getCart(student_id, semesterId ?? undefined);
         return successResponse(data, "Cart retrieved");
     } catch (error: any) {
         return errorResponse("Failed to retrieve cart", 500, error.message);

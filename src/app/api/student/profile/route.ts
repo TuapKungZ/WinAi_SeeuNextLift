@@ -5,9 +5,11 @@ import { z } from 'zod';
 import { parseStudentIdFromSession } from '@/app/api/student/_utils';
 
 const updateProfileSchema = z.object({
+    prefix: z.string().optional(),
     first_name: z.string().optional(),
     last_name: z.string().optional(),
     birthday: z.string().optional(),
+    date_of_birth: z.string().optional(),
     nickname: z.string().optional(),
     phone: z.string().optional(),
     parent_phone: z.string().optional(),

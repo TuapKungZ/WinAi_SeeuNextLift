@@ -33,7 +33,8 @@ export function ProfileFeature({ session }: ProfileFeatureProps) {
     // Mutation
     const updateProfileMutation = useMutation({
         mutationFn: (data: any) => StudentApiService.updateProfile(data),
-        onSuccess: () => {
+        onSuccess: (updatedProfile: any) => {
+            queryClient.setQueryData(["student", "profile"], updatedProfile);
             queryClient.invalidateQueries({ queryKey: ["student", "profile"] });
             setIsEditing(false);
             toast.success("อัปเดตข้อมูลส่วนตัวสำเร็จ");
@@ -56,11 +57,12 @@ export function ProfileFeature({ session }: ProfileFeatureProps) {
 
     useEffect(() => {
         if (profileQuery.data) {
+            const birthdayValue = (profileQuery.data as any).birthday || (profileQuery.data as any).date_of_birth;
             setFormData({
                 prefix: profileQuery.data.prefix || "",
                 first_name: profileQuery.data.first_name || "",
                 last_name: profileQuery.data.last_name || "",
-                birthday: profileQuery.data.birthday ? new Date(profileQuery.data.birthday).toISOString().split('T')[0] : "",
+                birthday: birthdayValue ? new Date(birthdayValue).toISOString().split('T')[0] : "",
                 phone: profileQuery.data.phone || "",
                 address: profileQuery.data.address || ""
             });
@@ -87,7 +89,7 @@ export function ProfileFeature({ session }: ProfileFeatureProps) {
 
     const advisor = getAdvisorText();
 
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
     };
@@ -99,13 +101,30 @@ export function ProfileFeature({ session }: ProfileFeatureProps) {
 
     const formatThaiDate = (dateStr: string) => {
         if (!dateStr) return "-";
-        return new Date(dateStr).toLocaleDateString("th-TH", {
+        const date = new Date(dateStr);
+        if (Number.isNaN(date.getTime())) return "-";
+        return date.toLocaleDateString("th-TH-u-ca-buddhist", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
         });
     };
 
     const getFullDisplayName = (p: any) => {
         const name = [p.prefix, p.first_name, p.last_name].filter(Boolean).join(' ').trim();
         return name || p.student_code || "-";
+    };
+
+    const getLevelRoomDisplay = (p: any) => {
+        const classLevel = String(p?.class_level || "").trim();
+        const room = String(p?.room || "").trim();
+
+        if (!classLevel && !room) return "-";
+        if (!room) return classLevel || "-";
+        if (!classLevel) return room;
+        if (room === classLevel || room.startsWith(`${classLevel}/`)) return room;
+
+        return `${classLevel}/${room}`;
     };
 
     if (isLoading) {
@@ -160,7 +179,7 @@ export function ProfileFeature({ session }: ProfileFeatureProps) {
                     <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/20 min-w-[140px]">
                         <div className="text-indigo-200 text-sm mb-1">ระดับ/ห้อง</div>
                         <div className="text-xl font-bold mt-1">
-                            {profile.class_level || "-"}{profile.room ? `/${profile.room}` : ""}
+                            {getLevelRoomDisplay(profile)}
                         </div>
                     </div>
                 </div>
@@ -220,7 +239,7 @@ export function ProfileFeature({ session }: ProfileFeatureProps) {
                             </div>
                             <div>
                                 <div className="text-sm text-slate-500 font-medium mb-1">วันเกิด</div>
-                                <div className="text-slate-800 font-semibold">{formatThaiDate(profile.birthday)}</div>
+                                <div className="text-slate-800 font-semibold">{formatThaiDate((profile as any).birthday || (profile as any).date_of_birth)}</div>
                             </div>
                         </div>
 
@@ -249,14 +268,18 @@ export function ProfileFeature({ session }: ProfileFeatureProps) {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                             <div className="md:col-span-2">
                                 <label className="block text-sm font-medium text-slate-700 mb-2">คำนำหน้าชื่อ</label>
-                                <input
-                                    type="text"
+                                <select
                                     name="prefix"
-                                    placeholder="เช่น นาย, นางสาว, เด็กชาย"
                                     value={formData.prefix}
                                     onChange={handleInputChange}
-                                    className="w-full md:w-1/3 border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                />
+                                    className="w-full md:w-1/3 border border-slate-300 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                                >
+                                    <option value={""}>{"\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E04\u0E33\u0E19\u0E33\u0E2B\u0E19\u0E49\u0E32"}</option>
+                                    <option value={"\u0E40\u0E14\u0E47\u0E01\u0E0A\u0E32\u0E22"}>{"\u0E40\u0E14\u0E47\u0E01\u0E0A\u0E32\u0E22"}</option>
+                                    <option value={"\u0E40\u0E14\u0E47\u0E01\u0E2B\u0E0D\u0E34\u0E07"}>{"\u0E40\u0E14\u0E47\u0E01\u0E2B\u0E0D\u0E34\u0E07"}</option>
+                                    <option value={"\u0E19\u0E32\u0E22"}>{"\u0E19\u0E32\u0E22"}</option>
+                                    <option value={"\u0E19\u0E32\u0E07\u0E2A\u0E32\u0E27"}>{"\u0E19\u0E32\u0E07\u0E2A\u0E32\u0E27"}</option>
+                                </select>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">ชื่อ</label>

@@ -2,10 +2,22 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { TeacherApiService } from "@/services/teacher-api.service";
+import { getCurrentAcademicYearBE } from "@/features/student/academic-term";
 
 function currentAcademicYearGuess() {
-    const now = new Date().getFullYear();
-    return now < 2400 ? now : now;
+    return getCurrentAcademicYearBE();
+}
+
+function formatClassRoomDisplay(classLevel?: string | null, room?: string | null) {
+    const level = String(classLevel || "").trim();
+    const roomValue = String(room || "").trim();
+
+    if (!level && !roomValue) return "-";
+    if (!roomValue) return level || "-";
+    if (!level) return roomValue;
+    if (roomValue === level || roomValue.startsWith(`${level}/`)) return roomValue;
+
+    return `${level}/${roomValue}`;
 }
 
 export function StudentsFeature({ session }: { session: any }) {
@@ -76,7 +88,7 @@ export function StudentsFeature({ session }: { session: any }) {
 
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 md:items-end">
                 <div>
-                    <label className="text-xs text-slate-500 block mb-1">ปี (พ.ศ.)</label>
+                    <label className="text-xs text-slate-500 block mb-1">ปีการศึกษา</label>
                     <input
                         type="number"
                         className="px-3 py-2 border border-slate-200 rounded-xl w-28"
@@ -126,7 +138,7 @@ export function StudentsFeature({ session }: { session: any }) {
                                     <td className="px-6 py-4 text-sm text-slate-500">{i + 1}</td>
                                     <td className="px-6 py-4 text-sm font-mono text-slate-700">{s.student_code}</td>
                                     <td className="px-6 py-4 text-sm text-slate-800 font-medium">{`${s.prefix || ""}${s.first_name || ""} ${s.last_name || ""}`.trim()}</td>
-                                    <td className="px-6 py-4 text-sm text-slate-600">{s.class_level || "-"}/{s.room || "-"}</td>
+                                    <td className="px-6 py-4 text-sm text-slate-600">{formatClassRoomDisplay(s.class_level, s.room)}</td>
                                     <td className="px-6 py-4 text-center">
                                         <Link href={`/teacher/student_profile?id=${s.id}`} className="text-xs text-emerald-600 hover:text-emerald-700 font-medium bg-emerald-50 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors">ดูโปรไฟล์</Link>
                                     </td>

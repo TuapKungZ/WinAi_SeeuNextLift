@@ -8,16 +8,24 @@ import { getAcademicSemesterDefault, getAcademicYearOptionsForStudent, getCurren
 
 interface LearningResultsFeatureProps {
     session: any;
+    initialTab?: "subject" | "advisor";
+    hideResultTabs?: boolean;
 }
 
-export function LearningResultsFeature({ session }: LearningResultsFeatureProps) {
+export function LearningResultsFeature({
+    session,
+    initialTab = "subject",
+    hideResultTabs = false,
+}: LearningResultsFeatureProps) {
     const student = session;
 
     // Select state
     const [year, setYear] = useState<number>(getCurrentAcademicYearBE());
     const [semester, setSemester] = useState<number>(getAcademicSemesterDefault());
     const [selectedSectionId, setSelectedSectionId] = useState<number | "">("");
+    const [activeResultTab, setActiveResultTab] = useState<"subject" | "advisor">(initialTab);
     const yearOptions = getAcademicYearOptionsForStudent(session.class_level, year);
+    const advisorOnlyMode = hideResultTabs && activeResultTab === "advisor";
 
     // Queries
     const registeredQuery = useQuery({
@@ -160,7 +168,7 @@ export function LearningResultsFeature({ session }: LearningResultsFeatureProps)
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className={`grid grid-cols-1 ${advisorOnlyMode ? "md:grid-cols-2" : "md:grid-cols-3"} gap-6`}>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">ปีการศึกษา</label>
                         <select
@@ -190,6 +198,7 @@ export function LearningResultsFeature({ session }: LearningResultsFeatureProps)
                             <option value={2}>2</option>
                         </select>
                     </div>
+                    {!advisorOnlyMode && (
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">รายวิชา</label>
                         <select
@@ -216,11 +225,40 @@ export function LearningResultsFeature({ session }: LearningResultsFeatureProps)
                             )}
                         </select>
                     </div>
+                    )}
                 </div>
                 <div className="mt-4 text-sm text-slate-500">ผลประเมินจะแสดงทันทีเมื่อเลือกปีและเทอม</div>
             </section>
 
+            {!hideResultTabs && (
+            <section className="bg-white p-3 rounded-2xl shadow-sm border border-slate-200">
+                <div className="inline-flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setActiveResultTab("subject")}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeResultTab === "subject"
+                            ? "bg-indigo-600 text-white"
+                            : "bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100"
+                            }`}
+                    >
+                        ผลประเมินรายวิชา
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveResultTab("advisor")}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${activeResultTab === "advisor"
+                            ? "bg-emerald-600 text-white"
+                            : "bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100"
+                            }`}
+                    >
+                        ผลประเมินโดยรวม (ครูที่ปรึกษา)
+                    </button>
+                </div>
+            </section>
+            )}
+
             {/* Subject Evaluation Results */}
+            {activeResultTab === "subject" && (
             <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-6">
                     <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
@@ -264,8 +302,10 @@ export function LearningResultsFeature({ session }: LearningResultsFeatureProps)
                     </div>
                 )}
             </section>
+            )}
 
             {/* Advisor Evaluation Results */}
+            {activeResultTab === "advisor" && (
             <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 mb-6">
                     <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
@@ -301,6 +341,7 @@ export function LearningResultsFeature({ session }: LearningResultsFeatureProps)
                     </div>
                 )}
             </section>
+            )}
         </div>
     );
 }

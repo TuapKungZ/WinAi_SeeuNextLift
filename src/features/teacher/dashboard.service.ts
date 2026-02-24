@@ -2,14 +2,21 @@ import { prisma } from '@/lib/prisma';
 
 export const TeacherDashboardService = {
     async getSummary(teacher_id: number) {
-        // Count distinct students enrolled in this teacher's assignments
-        const enrollments = await prisma.enrollments.findMany({
-            where: {
-                teaching_assignments: { teacher_id }
-            },
-            select: { student_id: true },
-            distinct: ['student_id']
+        // Count advisory students from classroom_advisors (to match /teacher/students)
+        const advisorLinks = await prisma.classroom_advisors.findMany({
+            where: { teacher_id },
+            select: { classroom_id: true },
+            distinct: ['classroom_id'],
         });
+        const advisoryClassroomIds = advisorLinks
+            .map((a) => a.classroom_id)
+            .filter((id): id is number => id != null);
+
+        const advisoryStudentCount = advisoryClassroomIds.length > 0
+            ? await prisma.students.count({
+                where: { classroom_id: { in: advisoryClassroomIds } },
+            })
+            : 0;
 
         // Count teaching assignments (subjects)
         const subjectCount = await prisma.teaching_assignments.count({
@@ -40,7 +47,7 @@ export const TeacherDashboardService = {
         const totalEvents = await prisma.events.count();
 
         return {
-            students: enrollments.length,
+            students: advisoryStudentCount,
             subjects: subjectCount,
             scoreItems: assessmentCount,
             allEvents: totalEvents,

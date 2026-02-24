@@ -3,9 +3,17 @@ import bcrypt from 'bcryptjs';
 
 export const AuthService = {
     async authenticateUser(code: string, password: string, role: string) {
-        // 1. Find user by username (student_code / teacher_code / director code)
-        const user = await prisma.users.findUnique({
-            where: { username: code },
+        const normalizedCode = String(code || '').trim();
+        const normalizedRole = String(role || '').toLowerCase().trim();
+
+        // 1. Find user by actor code
+        const user = await prisma.users.findFirst({
+            where:
+                normalizedRole === 'student'
+                    ? { students: { is: { student_code: normalizedCode } } }
+                    : normalizedRole === 'teacher'
+                        ? { teachers: { is: { teacher_code: normalizedCode } } }
+                        : { username: normalizedCode },
             include: {
                 roles: true,
                 students: {
@@ -32,7 +40,7 @@ export const AuthService = {
 
         // 2. Check role match
         const userRole = user.roles.role_name.toLowerCase();
-        if (userRole !== role.toLowerCase()) {
+        if (userRole !== normalizedRole) {
             throw new Error('บทบาทไม่ตรงกับผู้ใช้');
         }
 
@@ -45,7 +53,7 @@ export const AuthService = {
         // 4. Build payload based on role
         let payload: any = null;
 
-        if (role === 'student' && user.students) {
+        if (normalizedRole === 'student' && user.students) {
             const s = user.students;
             const prefix = s.name_prefixes?.prefix_name || '';
             const fullName = [prefix, s.first_name, s.last_name].filter(Boolean).join(' ').trim();
@@ -61,7 +69,7 @@ export const AuthService = {
                 class_level: classLevel,
                 room: room,
             };
-        } else if (role === 'teacher' && user.teachers) {
+        } else if (normalizedRole === 'teacher' && user.teachers) {
             const t = user.teachers;
             const prefix = t.name_prefixes?.prefix_name || '';
             const fullName = [prefix, t.first_name, t.last_name].filter(Boolean).join(' ').trim();
@@ -73,7 +81,7 @@ export const AuthService = {
                 role: 'teacher',
                 name: fullName || t.teacher_code,
             };
-        } else if (role === 'director') {
+        } else if (normalizedRole === 'director') {
             // Director has no separate profile table — use users data
             payload = {
                 id: user.id,

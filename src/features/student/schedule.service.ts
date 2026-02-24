@@ -5,7 +5,10 @@ export const ScheduleService = {
         if (!student_id) return [];
 
         // Build filter for enrollments
-        const enrollmentWhere: any = { student_id };
+        const enrollmentWhere: any = {
+            student_id,
+            NOT: { status: 'cart' },
+        };
 
         if (year || semester) {
             enrollmentWhere.teaching_assignments = {
@@ -68,6 +71,7 @@ export const ScheduleService = {
                     period: cs.periods?.period_name || '',
                     start_time: cs.periods?.start_time,
                     end_time: cs.periods?.end_time,
+                    room_name: cs.rooms?.room_name || '',
                     room: cs.rooms?.room_name || '',
                     class_level: ta.classrooms?.grade_levels?.name || '',
                     classroom: ta.classrooms?.room_name || '',

@@ -40,6 +40,44 @@ export const TeacherApiService = {
         if (teacher_id) params.set('teacher_id', String(teacher_id));
         return fetchApi<any>(`/api/teacher/student-profile?${params.toString()}`);
     },
+    async getStudentAdvisorEvaluationTemplate(student_id: number, teacher_id: number, year: number, semester: number) {
+        const params = new URLSearchParams({
+            student_id: String(student_id),
+            teacher_id: String(teacher_id),
+            year: String(year),
+            semester: String(semester),
+        });
+        return fetchApi<any>(`/api/teacher/student-profile/advisor-evaluation?${params.toString()}`);
+    },
+    async saveStudentAdvisorEvaluation(payload: {
+        student_id: number;
+        teacher_id: number;
+        year: number;
+        semester: number;
+        data: { name: string; score: number }[];
+        feedback?: string;
+    }) {
+        return fetchApi<any>('/api/teacher/student-profile/advisor-evaluation', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    },
+    async uploadStudentPhoto(student_id: number, teacher_id: number, file: File) {
+        const formData = new FormData();
+        formData.set('student_id', String(student_id));
+        formData.set('teacher_id', String(teacher_id));
+        formData.set('file', file);
+
+        const response = await fetch('/api/teacher/student-profile/photo', {
+            method: 'POST',
+            body: formData,
+        });
+        const data = await response.json();
+        if (!response.ok || !data?.success) {
+            throw new Error(data?.message || 'Failed to upload photo');
+        }
+        return data.data as { photo_url: string };
+    },
 
     // --- Scores ---
     async getTeacherSubjects(teacher_id: number) {
@@ -131,6 +169,14 @@ export const TeacherApiService = {
     async getAdvisorEvaluation(teacher_id: number, year?: number, semester?: number) {
         const params = new URLSearchParams();
         params.set('teacher_id', String(teacher_id));
+        if (year) params.set('year', String(year));
+        if (semester) params.set('semester', String(semester));
+        return fetchApi<any[]>(`/api/teacher/advisor-evaluation?${params.toString()}`);
+    },
+    async getAdvisorStudentResults(teacher_id: number, year?: number, semester?: number) {
+        const params = new URLSearchParams();
+        params.set('teacher_id', String(teacher_id));
+        params.set('mode', 'student_results');
         if (year) params.set('year', String(year));
         if (semester) params.set('semester', String(semester));
         return fetchApi<any[]>(`/api/teacher/advisor-evaluation?${params.toString()}`);

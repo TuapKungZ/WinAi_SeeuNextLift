@@ -2,6 +2,16 @@
 import { useState, useEffect } from "react";
 import { TeacherApiService } from "@/services/teacher-api.service";
 
+function formatRoomLabel(classLevel?: string | null, room?: string | null) {
+    const level = String(classLevel || "").trim();
+    const roomValue = String(room || "").trim();
+    if (!level && !roomValue) return "-";
+    if (!roomValue) return level || "-";
+    if (!level) return roomValue;
+    if (roomValue === level || roomValue.startsWith(`${level}/`)) return roomValue;
+    return `${level}/${roomValue}`;
+}
+
 export function AttendanceFeature({ session }: { session: any }) {
     const [subjects, setSubjects] = useState<any[]>([]);
     const [selectedSection, setSelectedSection] = useState<number | null>(null);
@@ -14,6 +24,13 @@ export function AttendanceFeature({ session }: { session: any }) {
     useEffect(() => {
         TeacherApiService.getTeacherSubjects(session.id).then(d => { setSubjects(d || []); setLoading(false); }).catch(() => setLoading(false));
     }, [session.id]);
+
+    const subjectOptions = (subjects || []).map((s: any) => ({
+        ...s,
+        roomLabel: formatRoomLabel(s.class_level, s.classroom || s.room),
+        subjectCode: s.subjects?.subject_code || s.subject_code || "-",
+        subjectName: s.subjects?.name || s.subject_name || "-",
+    }));
 
     const loadAttendance = async () => {
         if (!selectedSection) return;
@@ -52,17 +69,21 @@ export function AttendanceFeature({ session }: { session: any }) {
                 <div className="absolute top-0 right-0 w-64 h-full bg-white opacity-5 transform -skew-x-12 translate-x-20"></div>
                 <div className="relative z-10">
                     <div className="inline-block bg-white/20 px-3 py-1 rounded-full text-sm font-medium mb-4">Attendance</div>
-                    <h1 className="text-3xl font-bold">บันทึกเวลาเรียน</h1>
-                    <p className="text-blue-100 mt-2">เช็คชื่อนักเรียนรายคาบ</p>
+                    <h1 className="text-3xl font-bold">เช็คชื่อนักเรียน</h1>
+                    <p className="text-blue-100 mt-2">เช็คชื่อรายห้องและบันทึกสถานะการเข้าเรียน</p>
                 </div>
             </section>
 
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end">
                 <div className="flex-1 min-w-[200px]">
-                    <label className="text-xs text-slate-500 font-medium block mb-1">เลือกรายวิชา</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1">เลือกวิชา/ห้อง</label>
                     <select className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none" value={selectedSection || ""} onChange={e => setSelectedSection(Number(e.target.value))}>
-                        <option value="">-- เลือกรายวิชา --</option>
-                        {subjects.map(s => <option key={s.id} value={s.id}>{s.subjects?.subject_code} - {s.subjects?.name} ({s.class_level}/{s.classroom})</option>)}
+                        <option value="">-- เลือกวิชา/ห้อง --</option>
+                        {subjectOptions.map((s: any) => (
+                            <option key={s.id} value={s.id}>
+                                {s.subjectCode} - {s.subjectName} ({s.roomLabel})
+                            </option>
+                        ))}
                     </select>
                 </div>
                 <div>

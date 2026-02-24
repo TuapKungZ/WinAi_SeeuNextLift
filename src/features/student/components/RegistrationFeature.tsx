@@ -32,21 +32,31 @@ export function RegistrationFeature({ session }: { session: UserSession }) {
         if (!Array.isArray(items)) return [];
         const grouped: Record<string, any> = {};
         items.forEach(item => {
-            const key = item.subject_code;
+            const key = item.subject_code || `item-${item.enrollment_id ?? item.id ?? Math.random()}`;
+            const rowId = item.enrollment_id ?? item.id;
+            const scheduleTimes = Array.isArray(item.schedules)
+                ? item.schedules
+                    .map((sch: any) => `${sch?.day_of_week || sch?.day || ''} ${sch?.time_range || sch?.period || ''}`.trim())
+                    .filter((v: string) => v.length > 0)
+                : [];
+            const singleTime = `${item.day_of_week || ''} ${item.time_range || ''}`.trim();
             if (!grouped[key]) {
                 grouped[key] = {
                     ...item,
-                    ids: [item.id],
+                    ids: rowId != null ? [rowId] : [],
                     times: []
                 };
             } else {
-                grouped[key].ids.push(item.id);
+                if (rowId != null) grouped[key].ids.push(rowId);
             }
-            if (item.day_of_week || item.time_range) {
-                grouped[key].times.push(`${item.day_of_week || ''} ${item.time_range || ''}`.trim());
-            }
+            if (scheduleTimes.length > 0) grouped[key].times.push(...scheduleTimes);
+            else if (singleTime) grouped[key].times.push(singleTime);
         });
-        return Object.values(grouped);
+        return Object.values(grouped).map((g: any) => ({
+            ...g,
+            ids: Array.from(new Set((g.ids || []).filter((id: any) => id != null))),
+            times: Array.from(new Set((g.times || []).filter((t: string) => String(t || '').trim().length > 0))),
+        }));
     };
 
     // Queries
@@ -78,6 +88,19 @@ export function RegistrationFeature({ session }: { session: UserSession }) {
     const registeredItems = registeredQuery.data || [];
     const isInitLoading = advisorQuery.isLoading || cartQuery.isLoading || registeredQuery.isLoading;
     const yearOptions = getAcademicYearOptionsForStudent(session.class_level, year);
+    const getSubjectKey = (item: any) =>
+        item?.subject_id != null && String(item.subject_id) !== ''
+            ? `subject:${item.subject_id}`
+            : `code:${String(item?.subject_code || '').trim()}`;
+    const getSectionId = (item: any) => {
+        const raw = item?.section_id ?? item?.id;
+        const n = Number(raw);
+        return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    const cartSubjectKeys = new Set((cartItems || []).map((item: any) => getSubjectKey(item)));
+    const registeredSubjectKeys = new Set((registeredItems || []).map((item: any) => getSubjectKey(item)));
+    const cartSectionIds = new Set((cartItems || []).map((item: any) => getSectionId(item)).filter((v: number | null) => v != null));
+    const registeredSectionIds = new Set((registeredItems || []).map((item: any) => getSectionId(item)).filter((v: number | null) => v != null));
 
     // Mutations
     const addToCartMutation = useMutation({
@@ -348,7 +371,20 @@ export function RegistrationFeature({ session }: { session: UserSession }) {
                         <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30">
                             {searchResults.length > 0 ? (
                                 <div className="space-y-4">
-                                    {searchResults.map((subj, idx) => (
+                                    {searchResults.map((subj, idx) => {
+                                        const sectionId = Number(subj?.schedules?.[0]?.section_id || subj?.section_id || subj?.id || 0);
+                                        const subjectKey = getSubjectKey(subj);
+                                        const isRegistered =
+                                            registeredSubjectKeys.has(subjectKey)
+                                            || (Number.isFinite(sectionId) && sectionId > 0 && registeredSectionIds.has(sectionId));
+                                        const isInCart =
+                                            !isRegistered
+                                            && (
+                                                cartSubjectKeys.has(subjectKey)
+                                                || (Number.isFinite(sectionId) && sectionId > 0 && cartSectionIds.has(sectionId))
+                                            );
+
+                                        return (
                                         <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-5 border border-slate-200 rounded-2xl shadow-sm hover:border-emerald-200 transition-colors">
                                             <div className="mb-4 sm:mb-0">
                                                 <div className="font-semibold text-slate-800 text-lg flex items-center gap-2">
@@ -380,7 +416,15 @@ export function RegistrationFeature({ session }: { session: UserSession }) {
                                                 </div>
                                             </div>
                                             <div className="w-full sm:w-auto mt-2 sm:mt-0">
-                                                {(subj.schedules && subj.schedules.length > 0) ? (
+                                                {isRegistered ? (
+                                                    <div className="w-full sm:w-auto text-center text-sm font-medium text-emerald-700 bg-emerald-50 px-6 py-3 rounded-xl border border-emerald-200 cursor-not-allowed">
+                                                        ลงทะเบียนแล้ว
+                                                    </div>
+                                                ) : isInCart ? (
+                                                    <div className="w-full sm:w-auto text-center text-sm font-medium text-amber-700 bg-amber-50 px-6 py-3 rounded-xl border border-amber-200 cursor-not-allowed">
+                                                        อยู่ในตะกร้าแล้ว
+                                                    </div>
+                                                ) : ((subj.schedules && subj.schedules.length > 0) ? (
                                                     <button
                                                         onClick={() => handleSelectSubject(subj.schedules[0].section_id || subj.section_id)}
                                                         disabled={isActionLoading}
@@ -392,10 +436,10 @@ export function RegistrationFeature({ session }: { session: UserSession }) {
                                                     <div className="w-full sm:w-auto text-center text-sm text-slate-500 bg-slate-100 px-6 py-3 rounded-xl border border-dashed border-slate-300 cursor-not-allowed">
                                                         ลงทะเบียนไม่ได้
                                                     </div>
-                                                )}
+                                                ))}
                                             </div>
                                         </div>
-                                    ))}
+                                    )})}
                                 </div>
                             ) : (
                                 <div className="text-center py-16">

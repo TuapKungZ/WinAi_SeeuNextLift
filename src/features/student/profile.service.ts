@@ -26,6 +26,7 @@ export const ProfileService = {
             room: s.classrooms?.room_name || '',
             program: s.classrooms?.programs?.name || '',
             status: s.student_statuses?.status_name || '',
+            birthday: s.date_of_birth,
             date_of_birth: s.date_of_birth,
             phone: s.phone || '',
             address: s.address || '',
@@ -36,15 +37,41 @@ export const ProfileService = {
 
     async updateProfile(student_id: number, data: any) {
         if (!student_id) throw new Error("Student ID is required");
-        return prisma.students.update({
+        const birthdayInput = Object.prototype.hasOwnProperty.call(data, "birthday")
+            ? data.birthday
+            : data.date_of_birth;
+
+        let prefixId: number | null | undefined = undefined;
+        if (Object.prototype.hasOwnProperty.call(data, "prefix")) {
+            const prefixName = String(data.prefix || "").trim();
+            if (!prefixName) {
+                prefixId = null;
+            } else {
+                const prefix = await prisma.name_prefixes.findUnique({
+                    where: { prefix_name: prefixName },
+                    select: { id: true },
+                });
+                if (!prefix) {
+                    throw new Error(`Invalid prefix: ${prefixName}`);
+                }
+                prefixId = prefix.id;
+            }
+        }
+
+        await prisma.students.update({
             where: { id: student_id },
             data: {
                 first_name: data.first_name || undefined,
                 last_name: data.last_name || undefined,
-                date_of_birth: data.date_of_birth ? new Date(data.date_of_birth) : undefined,
+                date_of_birth: birthdayInput === ""
+                    ? null
+                    : (birthdayInput ? new Date(birthdayInput) : undefined),
                 phone: data.phone || undefined,
                 address: data.address || undefined,
+                prefix_id: prefixId,
             }
         });
+
+        return this.getProfile(student_id);
     }
 };

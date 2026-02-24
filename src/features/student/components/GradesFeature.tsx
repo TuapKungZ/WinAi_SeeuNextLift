@@ -7,6 +7,54 @@ import { Skeleton } from "@/components/Skeleton";
 import { PrintButton } from "@/components/PrintButton";
 import { getAcademicSemesterDefault, getAcademicYearOptionsForStudent, getCurrentAcademicYearBE } from "@/features/student/academic-term";
 
+const GRADE_POINT_MAP: Record<string, number> = {
+    A: 4,
+    "B+": 3.5,
+    B: 3,
+    "C+": 2.5,
+    C: 2,
+    "D+": 1.5,
+    D: 1,
+    F: 0,
+};
+
+const NUMERIC_GRADE_TO_LETTER_MAP: Record<string, string> = {
+    "4": "A",
+    "3.5": "B+",
+    "3": "B",
+    "2.5": "C+",
+    "2": "C",
+    "1.5": "D+",
+    "1": "D",
+    "0": "F",
+};
+
+function normalizeGradeLabel(rawGrade: unknown): string | null {
+    const raw = String(rawGrade ?? "").trim().toUpperCase();
+    if (!raw) return null;
+    if (raw in NUMERIC_GRADE_TO_LETTER_MAP) return NUMERIC_GRADE_TO_LETTER_MAP[raw];
+    if (raw in GRADE_POINT_MAP) return raw;
+    return null;
+}
+
+function getGradePointValue(row: any): number | null {
+    const gp = Number(row?.grade_point);
+    if (row?.grade_point != null && row?.grade_point !== "" && Number.isFinite(gp)) return gp;
+
+    const label = normalizeGradeLabel(row?.grade);
+    return label ? (GRADE_POINT_MAP[label] ?? null) : null;
+}
+
+function getCreditValue(row: any): number {
+    const credit = Number(row?.credit);
+    return Number.isFinite(credit) && credit > 0 ? credit : 0;
+}
+
+function isPassedGrade(row: any): boolean {
+    const label = normalizeGradeLabel(row?.grade);
+    return label !== null && label !== "F";
+}
+
 interface GradesFeatureProps {
     session: any;
 }
@@ -49,44 +97,43 @@ export function GradesFeature({ session }: GradesFeatureProps) {
     const latestAdviceData = advisorLatestQuery.data as any;
     const latestAdvisors = latestAdviceData?.advisors || (latestAdviceData?.advisor ? [latestAdviceData.advisor] : []);
 
-    const gradeMap: Record<string, number> = {
-        "A": 4, "B+": 3.5, "B": 3,
-        "C+": 2.5, "C": 2,
-        "D+": 1.5, "D": 1,
-        "F": 0
-    };
-
     // Derived State (Calculations)
     const { termCredit, gpa } = useMemo(() => {
-        let credits = 0;
+        let termCredits = 0;
+        let gpaCredits = 0;
         let points = 0;
         if (Array.isArray(grades)) {
             grades.forEach(r => {
-                const credit = Number(r.credit ?? 1);
-                const gp = gradeMap[r.grade];
-                if (gp !== undefined) {
-                    credits += credit;
+                const credit = getCreditValue(r);
+                termCredits += credit;
+                const gp = getGradePointValue(r);
+                if (gp !== null && credit > 0) {
+                    gpaCredits += credit;
                     points += gp * credit;
                 }
             });
         }
-        return { termCredit: credits, gpa: credits > 0 ? (points / credits) : 0 };
+        return { termCredit: termCredits, gpa: gpaCredits > 0 ? (points / gpaCredits) : 0 };
     }, [grades]);
 
     const { totalCreditsAll, totalGpa } = useMemo(() => {
-        let credits = 0;
+        let earnedCredits = 0;
+        let gpaCredits = 0;
         let points = 0;
         if (Array.isArray(allGrades)) {
             allGrades.forEach(r => {
-                const credit = Number(r.credit ?? 1);
-                const gp = gradeMap[r.grade];
-                if (gp !== undefined) {
-                    credits += credit;
+                const credit = getCreditValue(r);
+                if (isPassedGrade(r)) {
+                    earnedCredits += credit;
+                }
+                const gp = getGradePointValue(r);
+                if (gp !== null && credit > 0) {
+                    gpaCredits += credit;
                     points += gp * credit;
                 }
             });
         }
-        return { totalCreditsAll: credits, totalGpa: credits > 0 ? (points / credits) : 0 };
+        return { totalCreditsAll: earnedCredits, totalGpa: gpaCredits > 0 ? (points / gpaCredits) : 0 };
     }, [allGrades]);
 
     // Automatic Fallback Effect
@@ -266,9 +313,17 @@ export function GradesFeature({ session }: GradesFeatureProps) {
                                     </tr>
                                 ) : (
                                     grades.map((r: any, idx: number) => {
-                                        const hasGrade = r.grade !== null && r.grade !== undefined;
-                                        const statusLabel = hasGrade ? "ผ่าน" : "รอผล";
-                                        const statusClass = hasGrade ? "bg-green-100 text-green-700 print:bg-transparent print:text-black" : "bg-amber-100 text-amber-700 print:bg-transparent print:text-black";
+                                        const displayGrade = normalizeGradeLabel(r.grade);
+                                        const hasGrade = displayGrade !== null;
+                                        const isFailed = displayGrade === "F";
+                                        const statusLabel = !hasGrade
+                                            ? "รอผล"
+                                            : (isFailed ? "ไม่ผ่าน" : "ผ่าน");
+                                        const statusClass = !hasGrade
+                                            ? "bg-amber-100 text-amber-700 print:bg-transparent print:text-black"
+                                            : (isFailed
+                                                ? "bg-red-100 text-red-700 print:bg-transparent print:text-black"
+                                                : "bg-green-100 text-green-700 print:bg-transparent print:text-black");
 
                                         return (
                                             <tr key={idx} className="hover:bg-slate-50 transition-colors">
@@ -276,7 +331,7 @@ export function GradesFeature({ session }: GradesFeatureProps) {
                                                 <td className="px-6 py-4">{r.subject || "-"}</td>
                                                 <td className="px-6 py-4 text-center">{r.credit || "-"}</td>
                                                 <td className="px-6 py-4 text-center">{r.total ?? "-"}</td>
-                                                <td className="px-6 py-4 text-center font-bold text-slate-800">{r.grade ?? "-"}</td>
+                                                <td className="px-6 py-4 text-center font-bold text-slate-800">{displayGrade ?? "-"}</td>
                                                 <td className="px-6 py-4 text-center">
                                                     <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusClass}`}>
                                                         {statusLabel}

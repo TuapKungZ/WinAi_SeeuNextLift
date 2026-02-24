@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TeacherApiService } from "@/services/teacher-api.service";
+import { getCurrentAcademicYearBE } from "@/features/student/academic-term";
 
 function fmtDate(value: any) {
     if (!value) return "-";
@@ -30,8 +31,110 @@ function fmtPct(value: any) {
     return `${fmtNum(n, 2)}%`;
 }
 
+function toIntOrNull(value: any) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
 function hasMeaningfulValue(v: any) {
     return v !== null && v !== undefined && String(v).trim() !== "" && String(v).trim() !== "-";
+}
+
+function formatClassRoomDisplay(classLevel: any, room: any) {
+    const level = String(classLevel || "").trim();
+    const roomValue = String(room || "").trim();
+    if (!level && !roomValue) return "-";
+    if (!roomValue) return level || "-";
+    if (!level) return roomValue;
+    if (roomValue === level || roomValue.startsWith(`${level}/`)) return roomValue;
+    return `${level}/${roomValue}`;
+}
+
+function normalizeGradeLabel(rawGrade: any) {
+    const raw = String(rawGrade ?? "").trim().toUpperCase();
+    if (!raw) return null;
+    const numericMap: Record<string, string> = {
+        "4": "A",
+        "3.5": "B+",
+        "3": "B",
+        "2.5": "C+",
+        "2": "C",
+        "1.5": "D+",
+        "1": "D",
+        "0": "F",
+    };
+    if (raw in numericMap) return numericMap[raw];
+    return raw;
+}
+
+function normalizeTeacherStudentProfileResponse(raw: any) {
+    if (!raw) return null;
+    if (!raw.profile) return raw;
+
+    const base = raw.profile || {};
+    const gradeRows = Array.isArray(raw.grades) ? raw.grades : [];
+    const attendance = raw.attendance || null;
+    const conduct = raw.conduct || null;
+
+    const gradePointMap: Record<string, number> = { A: 4, "B+": 3.5, B: 3, "C+": 2.5, C: 2, "D+": 1.5, D: 1, F: 0 };
+    const gradedRows = gradeRows.filter((g: any) => normalizeGradeLabel(g?.grade));
+    const avgGradePoint = gradedRows.length > 0
+        ? gradedRows.reduce((sum: number, g: any) => sum + (gradePointMap[normalizeGradeLabel(g.grade) || "F"] ?? 0), 0) / gradedRows.length
+        : null;
+
+    const attendanceRate = attendance && Number(attendance.total) > 0
+        ? (Number(attendance.present || 0) / Number(attendance.total || 0)) * 100
+        : null;
+
+    const conductHistory = Array.isArray(conduct?.history) ? conduct.history : [];
+    const positivePoints = conductHistory.reduce((sum: number, row: any) => sum + Math.max(0, Number(row?.points || 0)), 0);
+    const negativePointsAbs = conductHistory.reduce((sum: number, row: any) => sum + Math.abs(Math.min(0, Number(row?.points || 0))), 0);
+
+    return {
+        ...base,
+        birthday: base.birthday || base.date_of_birth || null,
+        extended_profile: {
+            attendance: attendance ? {
+                ...attendance,
+                attendance_rate: attendanceRate,
+            } : null,
+            grades: {
+                count: gradeRows.length,
+                average_grade_point: avgGradePoint,
+                recent_grades: gradeRows.slice(0, 12).map((g: any, idx: number) => ({
+                    id: `${g.subject_code || "sub"}-${g.year || "-"}-${g.semester || "-"}-${idx}`,
+                    subject_code: g.subject_code,
+                    subject_name: g.subject_name,
+                    year: g.year,
+                    semester: g.semester,
+                    total_score: g.total_score,
+                    grade: normalizeGradeLabel(g.grade),
+                })),
+            },
+            conduct: conduct ? {
+                total_points: conduct.score,
+                count: conductHistory.length,
+                positive_points: positivePoints,
+                negative_points: negativePointsAbs,
+                recent: conductHistory.map((c: any, idx: number) => ({
+                    id: idx + 1,
+                    event: c.rule,
+                    point: Number(c.points || 0),
+                    point_type: Number(c.points || 0) >= 0 ? "positive" : "negative",
+                    log_date: c.date,
+                })),
+            } : null,
+            alerts: [],
+            profile_completion: null,
+            advisory: null,
+            scores: null,
+            registrations: null,
+            health: null,
+            fitness: null,
+            evaluations: null,
+            timeline: [],
+        },
+    };
 }
 
 export function StudentProfileFeature({ session }: { session: any }) {
@@ -42,6 +145,20 @@ export function StudentProfileFeature({ session }: { session: any }) {
     const [profile, setProfile] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [photoUploading, setPhotoUploading] = useState(false);
+    const [photoMessage, setPhotoMessage] = useState("");
+
+    const [advisorEvalYear, setAdvisorEvalYear] = useState<number>(getCurrentAcademicYearBE());
+    const [advisorEvalSemester, setAdvisorEvalSemester] = useState<number>(1);
+    const [advisorEvalLoading, setAdvisorEvalLoading] = useState(false);
+    const [advisorEvalSaving, setAdvisorEvalSaving] = useState(false);
+    const [advisorEvalMessage, setAdvisorEvalMessage] = useState("");
+    const [advisorEvalTopics, setAdvisorEvalTopics] = useState<{ id?: number; name: string }[]>([]);
+    const [advisorEvalScores, setAdvisorEvalScores] = useState<Record<string, number>>({});
+    const [advisorEvalFeedback, setAdvisorEvalFeedback] = useState("");
+    const [advisorEvalSubmittedAt, setAdvisorEvalSubmittedAt] = useState<any>(null);
+    const [learningYear, setLearningYear] = useState<number>(getCurrentAcademicYearBE());
+    const [learningSemester, setLearningSemester] = useState<number>(1);
 
     useEffect(() => {
         const load = async () => {
@@ -56,7 +173,7 @@ export function StudentProfileFeature({ session }: { session: any }) {
             setError("");
             try {
                 const data = await TeacherApiService.getStudentProfile(studentId, session.id);
-                setProfile(data || null);
+                setProfile(normalizeTeacherStudentProfileResponse(data) || null);
             } catch (e: any) {
                 setProfile(null);
                 setError(e?.message || "โหลดข้อมูลนักเรียนไม่สำเร็จ");
@@ -67,6 +184,54 @@ export function StudentProfileFeature({ session }: { session: any }) {
 
         load();
     }, [studentId, session.id]);
+
+    useEffect(() => {
+        const loadAdvisorEvaluationTemplate = async () => {
+            if (!studentId || Number.isNaN(studentId) || !session?.id) return;
+
+            setAdvisorEvalLoading(true);
+            setAdvisorEvalMessage("");
+            try {
+                const data = await TeacherApiService.getStudentAdvisorEvaluationTemplate(
+                    studentId,
+                    session.id,
+                    advisorEvalYear,
+                    advisorEvalSemester
+                );
+
+                const topics = Array.isArray(data?.topics) ? data.topics : [];
+                const current = Array.isArray(data?.current) ? data.current : [];
+                const currentMap: Record<string, number> = {};
+                current.forEach((item: any) => {
+                    const name = String(item?.name || "").trim();
+                    const score = Number(item?.score);
+                    if (name && Number.isFinite(score)) currentMap[name] = score;
+                });
+
+                const nextScores: Record<string, number> = {};
+                topics.forEach((t: any) => {
+                    const name = String(t?.name || "").trim();
+                    if (!name) return;
+                    nextScores[name] = currentMap[name] ?? 3;
+                });
+
+                setAdvisorEvalTopics(topics);
+                setAdvisorEvalScores(nextScores);
+                setAdvisorEvalFeedback(String(data?.feedback || ""));
+                setAdvisorEvalSubmittedAt(data?.submitted_at || null);
+            } catch (e: any) {
+                setAdvisorEvalTopics([]);
+                setAdvisorEvalScores({});
+                setAdvisorEvalFeedback("");
+                setAdvisorEvalSubmittedAt(null);
+                setAdvisorEvalMessage(e?.message || "โหลดแบบประเมินไม่สำเร็จ");
+            } finally {
+                setAdvisorEvalLoading(false);
+            }
+        };
+
+        loadAdvisorEvaluationTemplate();
+    }, [studentId, session?.id, advisorEvalYear, advisorEvalSemester]);
 
     useEffect(() => {
         if (!studentId || Number.isNaN(studentId)) {
@@ -118,6 +283,72 @@ export function StudentProfileFeature({ session }: { session: any }) {
         );
     }
 
+    const advisorYearOptions = Array.from({ length: 5 }, (_, i) => getCurrentAcademicYearBE() - i);
+
+    const handlePhotoUpload = async (file?: File | null) => {
+        if (!file || !studentId || !session?.id) return;
+        setPhotoUploading(true);
+        setPhotoMessage("");
+        try {
+            const result = await TeacherApiService.uploadStudentPhoto(studentId, session.id, file);
+            const cacheBusted = `${result.photo_url}${result.photo_url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+            setProfile((prev: any) => prev ? ({ ...prev, photo_url: cacheBusted }) : prev);
+            setPhotoMessage("อัปโหลดรูปเรียบร้อย");
+        } catch (e: any) {
+            setPhotoMessage(e?.message || "อัปโหลดรูปไม่สำเร็จ");
+        } finally {
+            setPhotoUploading(false);
+        }
+    };
+
+    const handleAdvisorEvaluationSave = async () => {
+        if (!studentId || !session?.id) return;
+        if (advisorEvalTopics.length === 0) {
+            setAdvisorEvalMessage("ไม่พบหัวข้อประเมิน");
+            return;
+        }
+
+        const data = advisorEvalTopics
+            .map((t) => {
+                const name = String(t?.name || "").trim();
+                const score = Number(advisorEvalScores[name]);
+                return { name, score };
+            })
+            .filter((item) => item.name && Number.isFinite(item.score))
+            .map((item) => ({ ...item, score: Math.max(1, Math.min(5, Math.round(item.score))) }));
+
+        if (data.length === 0) {
+            setAdvisorEvalMessage("กรุณากรอกคะแนนประเมินอย่างน้อย 1 รายการ");
+            return;
+        }
+
+        setAdvisorEvalSaving(true);
+        setAdvisorEvalMessage("");
+        try {
+            await TeacherApiService.saveStudentAdvisorEvaluation({
+                teacher_id: session.id,
+                student_id: studentId,
+                year: advisorEvalYear,
+                semester: advisorEvalSemester,
+                data,
+                feedback: advisorEvalFeedback,
+            });
+            setAdvisorEvalMessage("บันทึกผลประเมินแล้ว (นักเรียนจะเห็นในหน้าผลประเมินการเรียน)");
+
+            const refreshed = await TeacherApiService.getStudentAdvisorEvaluationTemplate(
+                studentId,
+                session.id,
+                advisorEvalYear,
+                advisorEvalSemester
+            );
+            setAdvisorEvalSubmittedAt(refreshed?.submitted_at || null);
+        } catch (e: any) {
+            setAdvisorEvalMessage(e?.message || "บันทึกผลประเมินไม่สำเร็จ");
+        } finally {
+            setAdvisorEvalSaving(false);
+        }
+    };
+
     const personalFields = [
         { label: "รหัสนักเรียน", value: profile.student_code },
         { label: "คำนำหน้า", value: profile.prefix },
@@ -150,6 +381,66 @@ export function StudentProfileFeature({ session }: { session: any }) {
     const fitness = extra?.fitness || null;
     const evaluations = extra?.evaluations || null;
     const timeline = Array.isArray(extra?.timeline) ? extra.timeline : [];
+    const hasLearningRegistrations = Array.isArray(registrations?.latest_term_registrations) && registrations.latest_term_registrations.length > 0;
+    const hasLearningGrades = Array.isArray(grades?.recent_grades) && grades.recent_grades.length > 0;
+    const allLearningScoreItems = Array.isArray(scoreOverview?.recent_items) ? scoreOverview.recent_items : [];
+
+    const learningYearSet = new Set<number>();
+    if (hasLearningRegistrations) {
+        const y = toIntOrNull(registrations?.latest_term?.year);
+        if (y) learningYearSet.add(y);
+    }
+    (grades?.recent_grades || []).forEach((g: any) => {
+        const y = toIntOrNull(g?.year);
+        if (y) learningYearSet.add(y);
+    });
+    allLearningScoreItems.forEach((item: any) => {
+        const y = toIntOrNull(item?.year);
+        if (y) learningYearSet.add(y);
+    });
+    if (learningYearSet.size === 0) learningYearSet.add(getCurrentAcademicYearBE());
+    const learningYearOptions = Array.from(learningYearSet).sort((a, b) => b - a);
+    const selectedLearningYear = learningYearOptions.includes(learningYear) ? learningYear : learningYearOptions[0];
+
+    const learningSemesterSet = new Set<number>();
+    if (hasLearningRegistrations) {
+        const regYear = toIntOrNull(registrations?.latest_term?.year);
+        const regSemester = toIntOrNull(registrations?.latest_term?.semester);
+        if ((regYear == null || regYear === selectedLearningYear) && regSemester) learningSemesterSet.add(regSemester);
+    }
+    (grades?.recent_grades || []).forEach((g: any) => {
+        const y = toIntOrNull(g?.year);
+        const s = toIntOrNull(g?.semester);
+        if ((y == null || y === selectedLearningYear) && s) learningSemesterSet.add(s);
+    });
+    allLearningScoreItems.forEach((item: any) => {
+        const y = toIntOrNull(item?.year);
+        const s = toIntOrNull(item?.semester);
+        if ((y == null || y === selectedLearningYear) && s) learningSemesterSet.add(s);
+    });
+    if (learningSemesterSet.size === 0) {
+        learningSemesterSet.add(1);
+        learningSemesterSet.add(2);
+    }
+    const learningSemesterOptions = Array.from(learningSemesterSet).sort((a, b) => a - b);
+    const selectedLearningSemester = learningSemesterOptions.includes(learningSemester) ? learningSemester : learningSemesterOptions[0];
+
+    const matchesLearningTerm = (yearValue: any, semesterValue: any) => {
+        const y = toIntOrNull(yearValue);
+        const s = toIntOrNull(semesterValue);
+        if (y != null && y !== selectedLearningYear) return false;
+        if (s != null && s !== selectedLearningSemester) return false;
+        return true;
+    };
+
+    const filteredLearningRegistrations = hasLearningRegistrations && matchesLearningTerm(registrations?.latest_term?.year, registrations?.latest_term?.semester)
+        ? (registrations.latest_term_registrations || [])
+        : [];
+    const filteredLearningGrades = (grades?.recent_grades || []).filter((g: any) => matchesLearningTerm(g?.year, g?.semester));
+    const filteredLearningScoreItems = allLearningScoreItems.filter((item: any) => matchesLearningTerm(item?.year, item?.semester));
+    const hasFilteredLearningRegistrations = filteredLearningRegistrations.length > 0;
+    const hasFilteredLearningGrades = filteredLearningGrades.length > 0;
+    const hasFilteredLearningScores = filteredLearningScoreItems.length > 0;
 
     const healthFields = [
         { label: "น้ำหนัก (กก.)", value: health?.latest?.weight },
@@ -177,7 +468,7 @@ export function StudentProfileFeature({ session }: { session: any }) {
                         <h1 className="text-3xl font-bold">{`${profile.prefix || ""}${profile.first_name || ""} ${profile.last_name || ""}`.trim()}</h1>
                         <p className="text-emerald-100 mt-2">ข้อมูลส่วนตัวนักเรียน • {profile.student_code}</p>
                         <div className="mt-3 flex flex-wrap gap-2 text-sm">
-                            <span className="rounded-full bg-white/15 px-3 py-1">ชั้น {profile.class_level || "-"} / ห้อง {profile.room || "-"}</span>
+                            <span className="rounded-full bg-white/15 px-3 py-1">ชั้น/ห้อง {formatClassRoomDisplay(profile.class_level, profile.room)}</span>
                             {advisory?.current && (
                                 <span className="rounded-full bg-white/15 px-3 py-1">
                                     ที่ปรึกษา ปี {advisory.current.year || "-"} ภาค {advisory.current.semester || "-"}
@@ -196,11 +487,49 @@ export function StudentProfileFeature({ session }: { session: any }) {
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                 <div className="xl:col-span-1 bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+                    <div className="mb-5 rounded-2xl border border-slate-200 p-4 bg-slate-50">
+                        <div className="flex items-start gap-4">
+                            {profile.photo_url ? (
+                                <img
+                                    src={profile.photo_url}
+                                    alt="student photo"
+                                    className="h-24 w-24 rounded-2xl object-cover border border-slate-200 bg-white"
+                                />
+                            ) : (
+                                <div className="h-24 w-24 rounded-2xl border border-dashed border-slate-300 bg-white flex items-center justify-center text-slate-400 text-xs text-center px-2">
+                                    ไม่มีรูปนักเรียน
+                                </div>
+                            )}
+                            <div className="flex-1">
+                                <div className="text-sm font-semibold text-slate-800">รูปนักเรียน</div>
+                                <div className="text-xs text-slate-500 mt-1">อัปโหลดจากหน้านี้ได้ (jpg/png/webp สูงสุด 5MB)</div>
+                                <label className="mt-3 inline-flex cursor-pointer items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                                    {photoUploading ? "กำลังอัปโหลด..." : "อัปโหลดรูป"}
+                                    <input
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/webp"
+                                        className="hidden"
+                                        disabled={photoUploading}
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            void handlePhotoUpload(file);
+                                            e.currentTarget.value = "";
+                                        }}
+                                    />
+                                </label>
+                                {photoMessage && (
+                                    <div className={`mt-2 text-xs ${photoMessage.includes("สำเร็จ") ? "text-emerald-700" : "text-rose-600"}`}>
+                                        {photoMessage}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
                     <div className="text-sm font-bold text-slate-800 mb-4">สรุป</div>
                     <div className="space-y-3 text-sm">
                         <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 border border-slate-100">
                             <span className="text-slate-500">ชั้น/ห้อง</span>
-                            <span className="font-semibold text-slate-800">{profile.class_level || "-"}/{profile.room || "-"}</span>
+                            <span className="font-semibold text-slate-800">{formatClassRoomDisplay(profile.class_level, profile.room)}</span>
                         </div>
                         <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 border border-slate-100">
                             <span className="text-slate-500">เพศ</span>
@@ -274,6 +603,122 @@ export function StudentProfileFeature({ session }: { session: any }) {
                 </div>
             </div>
 
+            <section className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <h3 className="text-lg font-bold text-slate-800">ครูประเมินนักเรียน (ผลประเมินโดยรวม)</h3>
+                        <p className="text-sm text-slate-500">บันทึกจากหน้านี้แล้วจะไปแสดงในหน้าผลประเมินการเรียนของนักเรียนคนนั้น</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <div>
+                            <label className="block text-xs text-slate-500 mb-1">ปีการศึกษา</label>
+                            <select
+                                className="px-3 py-2 border border-slate-200 rounded-xl bg-white"
+                                value={advisorEvalYear}
+                                onChange={(e) => setAdvisorEvalYear(Number(e.target.value))}
+                            >
+                                {advisorYearOptions.map((y) => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs text-slate-500 mb-1">ภาค</label>
+                            <select
+                                className="px-3 py-2 border border-slate-200 rounded-xl bg-white"
+                                value={advisorEvalSemester}
+                                onChange={(e) => setAdvisorEvalSemester(Number(e.target.value))}
+                            >
+                                <option value={1}>1</option>
+                                <option value={2}>2</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                {advisorEvalMessage && (
+                    <div className={`mt-4 rounded-xl px-4 py-3 text-sm border ${advisorEvalMessage.includes("สำเร็จ") || advisorEvalMessage.includes("บันทึก") ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+                        {advisorEvalMessage}
+                    </div>
+                )}
+
+                {advisorEvalSubmittedAt && (
+                    <div className="mt-4 text-xs text-slate-500">
+                        บันทึกล่าสุด: {fmtDateTime(advisorEvalSubmittedAt)}
+                    </div>
+                )}
+
+                {advisorEvalLoading ? (
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-slate-500">
+                        กำลังโหลดหัวข้อประเมิน...
+                    </div>
+                ) : advisorEvalTopics.length === 0 ? (
+                    <div className="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-slate-500">
+                        ไม่พบหัวข้อประเมินที่ปรึกษาในระบบ
+                    </div>
+                ) : (
+                    <div className="mt-4 space-y-5">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {advisorEvalTopics.map((topic, idx) => {
+                                const topicName = String(topic?.name || "").trim();
+                                const score = advisorEvalScores[topicName] ?? 3;
+                                return (
+                                    <div key={`${topic.id || idx}-${topicName}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                        <div className="text-sm font-medium text-slate-800">{topicName}</div>
+                                        <div className="mt-3 flex items-center gap-3">
+                                            <input
+                                                type="range"
+                                                min={1}
+                                                max={5}
+                                                step={1}
+                                                value={score}
+                                                onChange={(e) =>
+                                                    setAdvisorEvalScores((prev) => ({ ...prev, [topicName]: Number(e.target.value) }))
+                                                }
+                                                className="w-full accent-emerald-600"
+                                            />
+                                            <select
+                                                value={score}
+                                                onChange={(e) =>
+                                                    setAdvisorEvalScores((prev) => ({ ...prev, [topicName]: Number(e.target.value) }))
+                                                }
+                                                className="px-2 py-1.5 border border-slate-200 rounded-lg bg-white text-sm font-semibold text-slate-700"
+                                            >
+                                                {[1, 2, 3, 4, 5].map((n) => (
+                                                    <option key={n} value={n}>{n}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">ข้อเสนอแนะ (ถ้ามี)</label>
+                            <textarea
+                                value={advisorEvalFeedback}
+                                onChange={(e) => setAdvisorEvalFeedback(e.target.value)}
+                                rows={3}
+                                className="w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                                placeholder="บันทึกข้อเสนอแนะเพิ่มเติมสำหรับนักเรียน"
+                            />
+                        </div>
+
+                        <div className="flex justify-end">
+                            <button
+                                type="button"
+                                onClick={handleAdvisorEvaluationSave}
+                                disabled={advisorEvalSaving}
+                                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-white font-medium hover:bg-emerald-700 disabled:opacity-60"
+                            >
+                                {advisorEvalSaving ? "กำลังบันทึก..." : "บันทึกผลประเมิน"}
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </section>
+
             {extra && (
                 <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                     <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200">
@@ -317,7 +762,34 @@ export function StudentProfileFeature({ session }: { session: any }) {
                                 <h3 className="text-lg font-bold text-slate-800">ข้อมูลการเรียน / ผลการเรียน</h3>
                                 <p className="text-sm text-slate-500">สรุปรายวิชาที่ลงเรียน คะแนนรายหัวข้อ และผลเกรดที่มีในระบบ</p>
                             </div>
-                            <div className="flex flex-wrap gap-2 text-xs">
+                            <div className="flex flex-wrap items-end gap-3">
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-1">ปีการศึกษา</label>
+                                    <select
+                                        className="px-3 py-2 border border-slate-200 rounded-xl bg-white text-sm"
+                                        value={selectedLearningYear}
+                                        onChange={(e) => setLearningYear(Number(e.target.value))}
+                                    >
+                                        {learningYearOptions.map((y) => (
+                                            <option key={y} value={y}>{y}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-500 mb-1">ภาค</label>
+                                    <select
+                                        className="px-3 py-2 border border-slate-200 rounded-xl bg-white text-sm"
+                                        value={selectedLearningSemester}
+                                        onChange={(e) => setLearningSemester(Number(e.target.value))}
+                                    >
+                                        {learningSemesterOptions.map((s) => (
+                                            <option key={s} value={s}>{s}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
                                 {registrations?.latest_term && (
                                     <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
                                         ลงทะเบียนล่าสุด ปี {registrations.latest_term.year} ภาค {registrations.latest_term.semester}
@@ -328,18 +800,17 @@ export function StudentProfileFeature({ session }: { session: any }) {
                                         เกรดล่าสุด ปี {grades.latest_term.year} ภาค {grades.latest_term.semester}
                                     </span>
                                 )}
-                            </div>
                         </div>
 
-                        <div className="mt-5 grid grid-cols-1 xl:grid-cols-2 gap-6">
-                            {registrations?.latest_term_registrations?.length > 0 && (
+                        <div className="mt-5 grid grid-cols-1 gap-6">
+                            {hasFilteredLearningRegistrations && (
                                 <div className="rounded-2xl border border-slate-200 overflow-hidden">
                                     <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
                                         <div className="font-semibold text-slate-800">รายวิชาที่ลงทะเบียน (เทอมล่าสุด)</div>
-                                        <div className="text-xs text-slate-500">{registrations.latest_term_registrations.length} รายการ</div>
+                                        <div className="text-xs text-slate-500">{filteredLearningRegistrations.length} รายการ</div>
                                     </div>
                                     <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
-                                        {registrations.latest_term_registrations.map((r: any) => (
+                                        {filteredLearningRegistrations.map((r: any) => (
                                             <div key={r.id} className="px-4 py-3">
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-mono text-slate-700">{r.subject_code || "-"}</span>
@@ -357,11 +828,11 @@ export function StudentProfileFeature({ session }: { session: any }) {
                                 </div>
                             )}
 
-                            {grades?.recent_grades?.length > 0 && (
+                            {hasFilteredLearningGrades && (
                                 <div className="rounded-2xl border border-slate-200 overflow-hidden">
                                     <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
                                         <div className="font-semibold text-slate-800">ผลเกรดล่าสุด</div>
-                                        <div className="text-xs text-slate-500">{grades.recent_grades.length} รายการล่าสุด</div>
+                                        <div className="text-xs text-slate-500">{filteredLearningGrades.length} รายการในเทอมที่เลือก</div>
                                     </div>
                                     <div className="overflow-x-auto">
                                         <table className="w-full min-w-[620px]">
@@ -374,7 +845,7 @@ export function StudentProfileFeature({ session }: { session: any }) {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {grades.recent_grades.slice(0, 12).map((g: any, idx: number) => (
+                                                {filteredLearningGrades.slice(0, 12).map((g: any, idx: number) => (
                                                     <tr key={`${g.id}-${idx}`} className="border-b border-slate-100">
                                                         <td className="px-4 py-3 text-sm">
                                                             <div className="font-medium text-slate-800">{g.subject_name || "-"}</div>
@@ -398,17 +869,23 @@ export function StudentProfileFeature({ session }: { session: any }) {
                             )}
                         </div>
 
-                        {scoreOverview?.recent_items?.length > 0 && (
+                        {!hasFilteredLearningRegistrations && !hasFilteredLearningGrades && !hasFilteredLearningScores && (
+                            <div className="mt-6 rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-slate-500">
+                                ไม่พบข้อมูลการเรียน/ผลการเรียนในปีการศึกษา {selectedLearningYear} ภาค {selectedLearningSemester}
+                            </div>
+                        )}
+
+                        {hasFilteredLearningScores && (
                             <div className="mt-6 rounded-2xl border border-slate-200 p-4">
                                 <div className="flex items-center justify-between gap-2">
                                     <div>
                                         <div className="font-semibold text-slate-800">คะแนนรายหัวข้อล่าสุด</div>
                                         <div className="text-xs text-slate-500">ใช้ดูภาพรวมคะแนนที่ถูกบันทึกในระบบล่าสุด</div>
                                     </div>
-                                    <div className="text-xs text-slate-500">{scoreOverview.recent_items.length} รายการ</div>
+                                    <div className="text-xs text-slate-500">{filteredLearningScoreItems.length} รายการในเทอมที่เลือก</div>
                                 </div>
                                 <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                                    {scoreOverview.recent_items.slice(0, 9).map((item: any, idx: number) => (
+                                    {filteredLearningScoreItems.slice(0, 9).map((item: any, idx: number) => (
                                         <div key={`${item.id}-${idx}`} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                             <div className="flex items-center justify-between gap-2">
                                                 <span className="rounded-lg bg-white px-2 py-1 text-[11px] font-mono text-slate-700 border border-slate-200">{item.subject_code || "-"}</span>

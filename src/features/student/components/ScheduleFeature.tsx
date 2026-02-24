@@ -60,15 +60,22 @@ export function ScheduleFeature({ session }: ScheduleFeatureProps) {
         queryFn: () => StudentApiService.getAdvisor(),
     });
 
+    const cartQuery = useQuery({
+        queryKey: ["student", "cart", year, semester],
+        queryFn: () => StudentApiService.getCart(yearNum, semesterNum),
+        enabled: hasValidTerm,
+    });
+
     const classRows = classScheduleQuery.data || [];
     const examRows = examScheduleQuery.data || [];
+    const cartItems = cartQuery.data || [];
     const advDataAny = advisorQuery.data as any;
     const advisors = advDataAny?.advisors || (advDataAny?.advisor ? [advDataAny.advisor] : []);
-    const isLoading = hasValidTerm && (classScheduleQuery.isLoading || examScheduleQuery.isLoading || advisorQuery.isLoading);
+    const isLoading = hasValidTerm && (classScheduleQuery.isLoading || examScheduleQuery.isLoading || advisorQuery.isLoading || cartQuery.isLoading);
 
     const fixedSlots = [
         "8:00-8:50", "9:00-9:50", "10:00-10:50", "11:00-11:50",
-        "12:00-12:50", "13:00-13:50", "14:00-14:50", "15:00-15:50", "16:00-16:50"
+        "12:00-12:50", "13:00-13:50", "14:00-14:50", "15:00-15:50"
     ];
 
     // Update URL when year/semester changes
@@ -84,9 +91,9 @@ export function ScheduleFeature({ session }: ScheduleFeatureProps) {
 
     useEffect(() => {
         if (didAutoFallback || hasManualTermSelection || !hasValidTerm) return;
-        if (classScheduleQuery.isLoading || examScheduleQuery.isLoading || advisorQuery.isLoading) return;
+        if (classScheduleQuery.isLoading || examScheduleQuery.isLoading || advisorQuery.isLoading || cartQuery.isLoading) return;
 
-        const hasCurrentData = classRows.length > 0 || examRows.length > 0 || advisors.length > 0;
+        const hasCurrentData = classRows.length > 0 || cartItems.length > 0 || examRows.length > 0 || advisors.length > 0;
         if (hasCurrentData) return;
 
         const latestDataAny = advisorLatestQuery.data as any;
@@ -105,6 +112,8 @@ export function ScheduleFeature({ session }: ScheduleFeatureProps) {
         advisors.length,
         advisorLatestQuery.data,
         advisorQuery.isLoading,
+        cartItems.length,
+        cartQuery.isLoading,
         classRows.length,
         classScheduleQuery.isLoading,
         didAutoFallback,
@@ -160,17 +169,60 @@ export function ScheduleFeature({ session }: ScheduleFeatureProps) {
         return r.start < s.end && r.end > s.start;
     };
 
+    const formatClock = (value: any) => {
+        if (!value) return "";
+        const raw = String(value);
+        const m = raw.match(/(\d{2}:\d{2})/);
+        return m ? m[1] : "";
+    };
+    const buildTimeRange = (row: any) => {
+        const direct = String(row?.time_range || "").trim();
+        if (direct) return direct;
+        const start = formatClock(row?.start_time);
+        const end = formatClock(row?.end_time);
+        if (start && end) return `${start}-${end}`;
+        return String(row?.period || "").trim();
+    };
+
+    const cartScheduleRows = (cartItems || []).flatMap((item: any) =>
+        (Array.isArray(item?.schedules) ? item.schedules : []).map((sch: any) => ({
+            section_id: item.section_id || item.teaching_assignment_id || item.id,
+            subject_code: item.subject_code || "-",
+            subject_name: item.subject_name || "-",
+            teacher: item.teacher_name || "",
+            room_name: sch?.room_name || sch?.room || "",
+            room: sch?.room_name || sch?.room || "",
+            classroom: item.room || "",
+            day_of_week: sch?.day_of_week || sch?.day || "",
+            time_range: sch?.time_range || sch?.period || "",
+            source: "cart" as const,
+        }))
+    );
+    const mergedClassRows = [
+        ...(classRows || []).map((r: any) => ({
+            ...r,
+            day_of_week: r?.day_of_week || r?.day || "",
+            time_range: buildTimeRange(r),
+            teacher: r?.teacher || r?.teacher_name || "",
+            room_name: r?.room_name || r?.room || "",
+            source: "registered" as const,
+        })),
+        ...cartScheduleRows,
+    ].filter((r: any) => String(r?.day_of_week || "").trim() && String(r?.time_range || "").trim());
+
     // Prepare grid data
     const byDay: Record<string, any[]> = {};
-    classRows.forEach(r => {
+    mergedClassRows.forEach((r: any) => {
         const day = normalizeDay(r.day_of_week || "-");
         if (!byDay[day]) byDay[day] = [];
         byDay[day].push(r);
     });
 
     const baseDays = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
-    const extraDays = Object.keys(byDay).filter(d => !baseDays.includes(d));
-    const dayOrder = baseDays.concat(extraDays);
+    const weekdayDays = baseDays.slice(0, 5);
+    const hiddenDays = new Set(baseDays.slice(5));
+    const extraDays = Object.keys(byDay).filter(d => d !== "-" && !baseDays.includes(d) && !hiddenDays.has(d));
+    const dayOrder = weekdayDays.concat(extraDays);
 
     // Prepare exam data
     const filteredExams = examRows.filter(r => examFilter === "all" || String(r.exam_type).toLowerCase() === examFilter);
@@ -346,6 +398,12 @@ export function ScheduleFeature({ session }: ScheduleFeatureProps) {
                                 <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-md">อัปเดตล่าสุด</span>
                             </div>
 
+                            <div className="flex flex-wrap gap-2 mb-4 text-xs">
+                                <span className="px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">ลงทะเบียนแล้ว</span>
+                                <span className="px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200">ตะกร้า</span>
+                                <span className="px-2 py-1 rounded-md bg-rose-50 text-rose-700 border border-rose-200">ชนเวลา</span>
+                            </div>
+
                             <div className="overflow-x-auto pb-4">
                                 <table className="w-full text-sm text-left border-collapse min-w-[800px]">
                                     <thead className="text-xs text-slate-700 bg-slate-50 border-b border-t border-slate-200">
@@ -357,7 +415,7 @@ export function ScheduleFeature({ session }: ScheduleFeatureProps) {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {classRows.length === 0 ? (
+                                        {mergedClassRows.length === 0 ? (
                                             <tr>
                                                 <td colSpan={fixedSlots.length + 1} className="px-6 py-8 text-center text-slate-500 border-b border-slate-200">
                                                     ไม่มีข้อมูลตารางเรียน
@@ -374,16 +432,18 @@ export function ScheduleFeature({ session }: ScheduleFeatureProps) {
                                                             if (!matches.length) return <td key={slot} className="px-4 py-3 border-r border-slate-200"></td>;
 
                                                             return (
-                                                                <td key={slot} className="px-2 py-2 border-r border-slate-200 align-top">
+                                                                <td key={slot} className={`px-2 py-2 border-r border-slate-200 align-top ${matches.length > 1 ? 'bg-rose-50/60' : ''}`}>
                                                                     {matches.map((r, i) => (
-                                                                        <div key={i} className="bg-indigo-50 border border-indigo-100 rounded-lg p-2 mb-2 last:mb-0 text-xs">
-                                                                            <span className="font-bold text-indigo-700 block mb-1">{r.subject_code || "-"}</span>
-                                                                            <div className="text-slate-700 leading-snug break-words">{r.subject_name} {r.teacher ? `(${r.teacher})` : ""}</div>
-                                                                            {(r.room || r.classroom) && (
-                                                                                <div className="mt-1 text-slate-500">ห้อง {r.room || r.classroom}</div>
-                                                                            )}
+                                                                        <div key={`${r.source || 'registered'}-${r.section_id || r.subject_code || i}-${i}`} className={`rounded-lg p-2 mb-2 last:mb-0 text-xs border ${r.source === 'cart' ? 'bg-amber-50 border-amber-200' : 'bg-indigo-50 border-indigo-100'}`}>
+                                                                            <div className={`font-bold mb-1 ${r.source === 'cart' ? 'text-amber-700' : 'text-indigo-700'}`}>{r.subject_code || "-"}</div>
+                                                                            <div className="text-slate-700 leading-snug break-words">{r.subject_name || "-"}</div>
+                                                                            <div className="mt-1 text-slate-600 break-words">ผู้สอน {r.teacher || "-"}</div>
+                                                                            <div className="mt-1 text-slate-500 break-words">ห้อง {r.room_name || r.room || "-"}</div>
                                                                         </div>
                                                                     ))}
+                                                                    {matches.length > 1 && (
+                                                                        <div className="text-[10px] font-semibold text-rose-700 px-1">ชนเวลา {matches.length} รายการ</div>
+                                                                    )}
                                                                 </td>
                                                             );
                                                         })}

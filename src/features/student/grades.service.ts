@@ -1,5 +1,16 @@
 import { prisma } from '@/lib/prisma';
 
+const NUMERIC_TO_LETTER_GRADE: Record<string, string> = {
+    '4': 'A',
+    '3.5': 'B+',
+    '3': 'B',
+    '2.5': 'C+',
+    '2': 'C',
+    '1.5': 'D+',
+    '1': 'D',
+    '0': 'F',
+};
+
 export const GradesService = {
     async getGrades(student_id: number, year?: number, semester?: number) {
         if (!student_id) return [];
@@ -67,14 +78,17 @@ export const GradesService = {
             });
 
             const finalGrade = enrollment.final_grades;
+            const normalizedGrade = normalizeGradeLabel(finalGrade?.letter_grade);
+            const gradePoint = resolveGradePoint(normalizedGrade, finalGrade?.grade_point, finalGrade?.letter_grade);
 
             uniqueSubjects.set(subject.subject_code, {
                 subject_code: subject.subject_code,
                 subject: subject.subject_name,
                 credit: Number(subject.credit || 0),
                 total: finalGrade ? Number(finalGrade.total_score) : totalScore,
-                grade: finalGrade?.letter_grade || null,
-                grade_point: finalGrade?.grade_point ? Number(finalGrade.grade_point) : null,
+                grade: normalizedGrade,
+                grade_raw: finalGrade?.letter_grade ?? null,
+                grade_point: gradePoint,
                 year: ta.semesters?.academic_years?.year_name || '',
                 semester: ta.semesters?.semester_number || 0,
             });
@@ -85,3 +99,39 @@ export const GradesService = {
         );
     }
 };
+
+function normalizeGradeLabel(rawGrade: unknown): string | null {
+    const raw = String(rawGrade ?? '').trim().toUpperCase();
+    if (!raw) return null;
+
+    if (raw in NUMERIC_TO_LETTER_GRADE) return NUMERIC_TO_LETTER_GRADE[raw];
+
+    if (['A', 'B+', 'B', 'C+', 'C', 'D+', 'D', 'F'].includes(raw)) {
+        return raw;
+    }
+
+    return null;
+}
+
+function resolveGradePoint(normalizedGrade: string | null, rawGradePoint: unknown, rawGradeLabel: unknown): number | null {
+    const parsedGradePoint = Number(rawGradePoint);
+    if (rawGradePoint != null && rawGradePoint !== '' && Number.isFinite(parsedGradePoint)) {
+        return parsedGradePoint;
+    }
+
+    const label = normalizedGrade ?? normalizeGradeLabel(rawGradeLabel);
+    if (!label) return null;
+
+    const map: Record<string, number> = {
+        A: 4,
+        'B+': 3.5,
+        B: 3,
+        'C+': 2.5,
+        C: 2,
+        'D+': 1.5,
+        D: 1,
+        F: 0,
+    };
+
+    return map[label] ?? null;
+}

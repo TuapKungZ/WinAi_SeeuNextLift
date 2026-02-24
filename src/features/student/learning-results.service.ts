@@ -1,14 +1,5 @@
 import { prisma } from '@/lib/prisma';
 
-async function getStudentUserId(student_id: number) {
-    if (!student_id) return null;
-    const student = await prisma.students.findUnique({
-        where: { id: student_id },
-        select: { user_id: true },
-    });
-    return student?.user_id ?? null;
-}
-
 async function resolveEvaluationPeriodId(year?: number, semester?: number) {
     if (!year || !semester) return null;
     const period = await prisma.evaluation_periods.findFirst({
@@ -28,35 +19,35 @@ export const LearningResultsService = {
     // Advisor evaluation (1-5 scale)
     async getAdvisorEvaluation(student_id: number, year?: number, semester?: number) {
         if (!student_id) return [];
-
-        const user_id = await getStudentUserId(student_id);
-        if (!user_id) return [];
-
-        const where: any = {
-            user_id,
-            evaluation_forms: { is: { type: 'advisor' } },
-        };
         const period_id = await resolveEvaluationPeriodId(year, semester);
-        if (period_id) where.period_id = period_id;
+        const responseRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(
+            `
+            SELECT er.id
+            FROM public.evaluation_responses er
+            INNER JOIN public.evaluation_forms ef ON ef.id = er.form_id
+            WHERE LOWER(COALESCE(ef.type, '')) = 'advisor'
+              AND UPPER(COALESCE(er.target_type, '')) = 'STUDENT'
+              AND er.target_id = ${Number(student_id)}
+              ${period_id ? `AND er.period_id = ${Number(period_id)}` : ''}
+            ORDER BY er.submitted_at DESC NULLS LAST, er.id DESC
+            LIMIT 1
+            `
+        );
 
-        const responses = await prisma.evaluation_responses.findMany({
-            where,
-            include: {
-                evaluation_answers: {
-                    include: { evaluation_questions: true },
-                },
-                evaluation_forms: true,
-            },
-            orderBy: { submitted_at: 'desc' },
-            take: 1,
+        const latestResponseId = responseRows?.[0]?.id;
+        if (!latestResponseId) return [];
+
+        const answers = await prisma.evaluation_answers.findMany({
+            where: { response_id: latestResponseId },
+            include: { evaluation_questions: true },
+            orderBy: { id: 'asc' },
         });
 
-        if (responses.length === 0) return [];
-
-        return responses[0].evaluation_answers
+        return answers
+            .filter((a) => a.score != null)
             .map((a) => ({
                 name: a.evaluation_questions?.question_text || a.answer_text || '',
-                score: a.score != null ? Number(a.score) : 0,
+                score: Number(a.score),
             }))
             .filter((a) => a.name && Number.isFinite(a.score));
     },

@@ -5,6 +5,7 @@ export async function GET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const teacher_id = Number(searchParams.get('teacher_id'));
+        const mode = (searchParams.get('mode') || '').toLowerCase();
         const yearParam = searchParams.get('year');
         const semesterParam = searchParams.get('semester');
         const year = yearParam ? Number(yearParam) : undefined;
@@ -14,7 +15,9 @@ export async function GET(request: Request) {
         if (yearParam && (year == null || Number.isNaN(year))) return errorResponse('year invalid', 400);
         if (semesterParam && (semester == null || Number.isNaN(semester))) return errorResponse('semester invalid', 400);
 
-        const data = await TeacherEvaluationService.getAdvisorEvaluation(teacher_id, year, semester);
+        const data = mode === 'student_results'
+            ? await TeacherEvaluationService.getAdvisorStudentEvaluationResults(teacher_id, year, semester)
+            : await TeacherEvaluationService.getAdvisorEvaluation(teacher_id, year, semester);
         return successResponse(data);
     } catch (error: any) {
         return errorResponse('Failed', 500, error.message);
